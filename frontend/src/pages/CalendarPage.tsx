@@ -1,29 +1,91 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Calendar from 'react-calendar';
 import 'react-calendar/dist/Calendar.css';
+
+// Define Entry type
+interface Entry {
+  id: string; // Or number
+  date: string; // Backend date string (e.g., ISO format)
+  content: string;
+}
 
 type ValuePiece = Date | null;
 type Value = ValuePiece | [ValuePiece, ValuePiece];
 
+// Utility function to format a Date object into YYYY-MM-DD string
+const formatDateToKey = (date: Date): string => {
+  const year = date.getFullYear();
+  const month = (date.getMonth() + 1).toString().padStart(2, '0');
+  const day = date.getDate().toString().padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+/**
+ * CalendarPage displays a calendar allowing users to view their journal entries by date.
+ * It fetches entries from the backend and highlights dates with entries.
+ * Users can click on a date to see the entry content for that day.
+ */
 export default function CalendarPage() {
   const [value, setValue] = useState<Value>(new Date());
-  const [selectedEntry, setSelectedEntry] = useState<string | null>(null);
+  const [entriesMap, setEntriesMap] = useState<Map<string, Entry>>(new Map());
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedEntryContent, setSelectedEntryContent] = useState<string | null>(null);
 
-  // Mock data - replace with actual data from backend
-  const entries = {
-    '2024-03-20': 'Today\'s entry about perspective...',
-    '2024-03-19': 'Yesterday\'s reflection on growth...',
+  // Placeholder for userId - in a real app, this would come from auth context
+  const userId = "currentUser123";
+
+  useEffect(() => {
+    const fetchEntries = async () => {
+      setIsLoading(true);
+      setError(null);
+      try {
+        const response = await fetch(`/api/entries?userId=${userId}`);
+        if (!response.ok) {
+          throw new Error(`Failed to fetch entries: ${response.statusText} (${response.status})`);
+        }
+        const data: Entry[] = await response.json();
+
+        const newEntriesMap = new Map<string, Entry>();
+        data.forEach(entry => {
+          // Backend date needs to be parsed and formatted to local YYYY-MM-DD
+          const entryDate = new Date(entry.date);
+          const dateStr = formatDateToKey(entryDate);
+          newEntriesMap.set(dateStr, entry);
+        });
+        setEntriesMap(newEntriesMap);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'An unknown error occurred while fetching entries.');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchEntries();
+  }, [userId]); // Dependency array includes userId
+
+  const tileClassName = ({ date, view }: { date: Date; view: string }) => {
+    if (view === 'month') {
+      const dateStr = formatDateToKey(date);
+      return entriesMap.has(dateStr) ? 'bg-accent-100' : '';
+    }
+    return '';
   };
 
-  const tileClassName = ({ date }: { date: Date }) => {
-    const dateStr = date.toISOString().split('T')[0];
-    return entries[dateStr as keyof typeof entries] ? 'bg-accent-100' : '';
+  const handleDateClick = (clickedDate: Date) => {
+    setValue(clickedDate);
+    const dateStr = formatDateToKey(clickedDate);
+    const entry = entriesMap.get(dateStr);
+    setSelectedEntryContent(entry ? entry.content : null);
   };
 
-  const handleDateClick = (date: Date) => {
-    const dateStr = date.toISOString().split('T')[0];
-    setSelectedEntry(entries[dateStr as keyof typeof entries] || null);
-  };
+  if (isLoading) {
+    return <div className="text-center p-8 text-xl text-primary-700">Loading entries...</div>;
+  }
+
+  if (error) {
+    return <div className="text-center p-8 text-xl text-red-600">Error: {error}</div>;
+  }
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -32,7 +94,6 @@ export default function CalendarPage() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
         <div className="card">
           <Calendar
-            onChange={setValue}
             value={value}
             tileClassName={tileClassName}
             onClickDay={handleDateClick}
@@ -41,16 +102,20 @@ export default function CalendarPage() {
         </div>
 
         <div className="card">
-          {selectedEntry ? (
+          {selectedEntryContent ? (
             <div>
               <h2 className="text-xl font-serif text-primary-900 mb-4">
-                Entry for {value instanceof Date ? value.toLocaleDateString() : ''}
+                Entry for {value instanceof Date ? value.toLocaleDateString() :
+                            (Array.isArray(value) && value[0] ? value[0].toLocaleDateString() : 'Selected Date')}
               </h2>
-              <p className="text-primary-700 whitespace-pre-wrap">{selectedEntry}</p>
+              <p className="text-primary-700 whitespace-pre-wrap">{selectedEntryContent}</p>
             </div>
           ) : (
             <div className="text-center text-primary-600 py-8">
-              Select a date to view your entry
+              { value instanceof Date && entriesMap.has(formatDateToKey(value))
+                ? 'This date has an entry, but its content appears empty or could not be displayed.'
+                : 'Select a date with an entry to view it, or pick any date to start a new reflection.'
+              }
             </div>
           )}
         </div>
